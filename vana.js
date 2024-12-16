@@ -187,21 +187,30 @@ const twocaptcha_turnstile = (sitekey, pageurl) => new Promise(async (resolve) =
     }
 });
 
-// clickFollowButton
 async function clickFollowButton(proxy) {
     try {
+        // 프록시 URL 파싱
+        const proxyUrl = new URL(proxy);
+        const [username, password] = proxyUrl.username ? 
+            decodeURIComponent(proxyUrl.username).split(':') : [];
+
         const browser = await puppeteer.launch({
             headless: 'new',
             args: [
-                proxy ? `--proxy-server=${proxy}` : '',
+                `--proxy-server=${proxyUrl.host}`,
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage', 
+                '--disable-dev-shm-usage',
                 '--disable-gpu'
-            ].filter(arg => arg !== '')
+            ]
         });
         
         const page = await browser.newPage();
+        
+        // 프록시 인증 설정
+        if (username && password) {
+            await page.authenticate({ username, password });
+        }
         
         await page.goto('https://faucet.vana.com/mainnet', {
             waitUntil: 'networkidle0',
