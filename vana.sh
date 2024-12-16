@@ -14,6 +14,23 @@ sudo apt-get install -y build-essential
 sudo apt-get install -y nodejs
 sudo apt-get install -y npm
 sudo apt-get install -y git
+apt-get install -y \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxi6 \
+    libxtst6 \
+    libnss3 \
+    libcups2 \
+    libxss1 \
+    libxrandr2 \
+    libasound2 \
+    libpangocairo-1.0-0 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    libgbm1
 
 # 작업 디렉토리 설정
 work="/root/vana"
