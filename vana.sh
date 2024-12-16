@@ -43,13 +43,13 @@ echo -e "${YELLOW}Node.js LTS 버전을 설치하고 설정 중...${NC}"
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
 export NVM_DIR="$([ -z "${XDG_CONFIG_HOME-}" ] && printf %s "${HOME}/.nvm" || printf %s "${XDG_CONFIG_HOME}/nvm")"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" # nvm을 로드합니다
-nvm install --lts
-nvm use --lts
+nvm install 18
+nvm use 18
 
 # Node.js 모듈 설치
 echo -e "${YELLOW}필요한 Node.js 모듈을 설치합니다...${NC}"
 sudo apt-get install -y build-essential
-npm install node-fetch puppeteer ethers https-proxy-agent dotenv puppeteer
+npm install node-fetch@2 puppeteer ethers https-proxy-agent dotenv puppeteer
 
 # .env 파일 생성
 echo -e "${YELLOW}.env 파일을 생성합니다...${NC}"
