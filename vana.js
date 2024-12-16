@@ -191,12 +191,13 @@ const twocaptcha_turnstile = (sitekey, pageurl) => new Promise(async (resolve) =
 async function clickFollowButton(proxy) {
     try {
         const browser = await puppeteer.launch({
-            headless: false,
-            defaultViewport: null,
+            headless: 'new',
             args: [
                 proxy ? `--proxy-server=${proxy}` : '',
                 '--no-sandbox',
-                '--disable-setuid-sandbox'
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage', 
+                '--disable-gpu'
             ].filter(arg => arg !== '')
         });
         
