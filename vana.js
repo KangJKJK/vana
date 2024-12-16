@@ -75,34 +75,53 @@ async function processAccount(address, privateKey, proxy, index) {
     console.log(`주소: ${address}`);
     console.log(`프록시: ${proxy}`);
 
-    try {
-        // Follow 버튼 클릭
-        console.log('Follow 버튼 클릭 시도...');
-        const followSuccess = await clickFollowButton(proxy);
-        if (!followSuccess) {
-            throw new Error('Follow 버튼 클릭 실패');
+    let retryCount = 0;
+    const maxRetries = 3; // 최대 재시도 횟수
+
+    while (retryCount < maxRetries) {
+        try {
+            // 1. Follow 버튼 클릭
+            console.log('Follow 버튼 클릭 시도...');
+            const followSuccess = await clickFollowButton(proxy);
+            if (!followSuccess) {
+                throw new Error('Follow 버튼 클릭 실패');
+            }
+            console.log('Follow 버튼 클릭 성공');
+
+            // 2. Captcha 토큰 획득
+            console.log('Captcha 토큰 획득 시도...');
+            const captchaToken = await twocaptcha_turnstile('0x4AAAAAAADnHQBlrqABLwx', 'https://faucet.vana.com/mainnet');
+            if (captchaToken === 'ERROR_WRONG_USER_KEY' || captchaToken === 'ERROR_ZERO_BALANCE' || captchaToken === 'FAILED_GETTING_TOKEN') {
+                throw new Error(`Captcha 토큰 획득 실패: ${captchaToken}`);
+            }
+            console.log('Captcha 토큰 획득 성공');
+
+            // 3. Faucet 청구
+            console.log('Faucet 청구 시도...');
+            const claimResult = await claimFaucet(address, captchaToken, proxy);
+            if (!claimResult.includes('성공')) {
+                throw new Error(`Faucet 청구 실패: ${claimResult}`);
+            }
+            console.log(`Faucet 청구 성공: ${claimResult}`);
+
+            return true; // 모든 단계가 성공적으로 완료됨
+
+        } catch (error) {
+            retryCount++;
+            console.error(`계정 ${index + 1} 처리 중 오류 발생 (시도 ${retryCount}/${maxRetries}):`, error.message);
+            
+            if (retryCount < maxRetries) {
+                console.log(`30초 후 재시도합니다...`);
+                await delay(30000); // 30초 대기 후 재시도
+            } else {
+                console.log(`최대 재시도 횟수 도달. 계정 ${index + 1} 처리 실패`);
+                return false;
+            }
         }
-        console.log('Follow 버튼 클릭 성공');
-
-        // Captcha 토큰 획득
-        console.log('Captcha 토큰 획득 시도...');
-        const captchaToken = await twocaptcha_turnstile('0x4AAAAAAADnHQBlrqABLwx', 'https://faucet.vana.com/mainnet');
-        if (captchaToken === 'ERROR_WRONG_USER_KEY' || captchaToken === 'ERROR_ZERO_BALANCE' || captchaToken === 'FAILED_GETTING_TOKEN') {
-            throw new Error(`Captcha 토큰 획득 실패: ${captchaToken}`);
-        }
-        console.log('Captcha 토큰 획득 성공');
-
-        // Faucet 청구
-        console.log('Faucet 청구 시도...');
-        const claimResult = await claimFaucet(address, captchaToken, proxy);
-        console.log(`Faucet 청구 결과: ${claimResult}`);
-
-        return true;
-    } catch (error) {
-        console.error(`계정 ${index + 1} 처리 중 오류 발생:`, error.message);
-        return false;
     }
+    return false;
 }
+
 async function main() {
     const captchaKey = check2CaptchaKey();
     if (!captchaKey) {
@@ -292,3 +311,4 @@ const claimFaucet = (address) => new Promise(async (resolve) => {
         }
     }
 });
+
