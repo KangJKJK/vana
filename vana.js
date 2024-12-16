@@ -187,17 +187,21 @@ const twocaptcha_turnstile = (sitekey, pageurl) => new Promise(async (resolve) =
     }
 });
 
+// clickFollowButton
 async function clickFollowButton(proxy) {
     try {
-        // 프록시 URL 파싱
-        const proxyUrl = new URL(proxy);
-        const [username, password] = proxyUrl.username ? 
-            decodeURIComponent(proxyUrl.username).split(':') : [];
+        // 프록시 URL에서 인증 정보 추출
+        const proxyParts = proxy.split('@');
+        const auth = proxyParts[0].replace('http://', '').split(':');
+        const host = proxyParts[1];
+        
+        const username = auth[0];
+        const password = auth[1];
 
         const browser = await puppeteer.launch({
             headless: 'new',
             args: [
-                `--proxy-server=${proxyUrl.host}`,
+                `--proxy-server=${host}`,
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
@@ -208,9 +212,10 @@ async function clickFollowButton(proxy) {
         const page = await browser.newPage();
         
         // 프록시 인증 설정
-        if (username && password) {
-            await page.authenticate({ username, password });
-        }
+        await page.authenticate({
+            username: username,
+            password: password
+        });
         
         await page.goto('https://faucet.vana.com/mainnet', {
             waitUntil: 'networkidle0',
