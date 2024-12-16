@@ -49,13 +49,7 @@ nvm use --lts
 # Node.js 모듈 설치
 echo -e "${YELLOW}필요한 Node.js 모듈을 설치합니다...${NC}"
 sudo apt-get install -y build-essential
-npm install ethers
-npm install puppeteer
-npm install dotenv
-npm install https-proxy-agent
-
-# npm 최신 버전으로 업데이트
-sudo npm install -g npm@latest
+npm install node-fetch puppeteer ethers https-proxy-agent dotenv puppeteer
 
 # .env 파일 생성
 echo -e "${YELLOW}.env 파일을 생성합니다...${NC}"
