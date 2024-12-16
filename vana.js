@@ -109,11 +109,17 @@ async function main() {
         console.error('2Captcha API 키를 찾을 수 없습니다. vana.sh를 다시 실행해주세요.');
         return;
     }
-    const proxies = getProxies();
-    const addresses = getGeneratedAddresses();
 
-    if (proxies.length === 0 || addresses.length === 0) {
-        console.error('프록시 또는 주소 정보를 찾을 수 없습니다.');
+    // 여기서 지갑 생성 함수 실행
+    const addresses = await generateWallets();
+    if (addresses.length === 0) {
+        console.error('지갑 생성에 실패했습니다.');
+        return;
+    }
+
+    const proxies = getProxies();
+    if (proxies.length === 0) {
+        console.error('프록시 정보를 찾을 수 없습니다.');
         return;
     }
 
@@ -271,5 +277,3 @@ const claimFaucet = (address) => new Promise(async (resolve) => {
         }
     }
 });
-
-
