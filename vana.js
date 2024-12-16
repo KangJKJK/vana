@@ -26,7 +26,7 @@ function check2CaptchaKey() {
 // 프록시 리스트 가져오기
 function getProxies() {
     try {
-        const proxyFile = fs.readFileSync('./proxy_list.js', 'utf8');
+        const proxyFile = fs.readFileSync('/root/vana/proxy_list.js', 'utf8');  // 올바른 경로로 수정
         return proxyFile.split('\n')
             .filter(line => line.includes('\"'))
             .map(line => {
@@ -40,28 +40,34 @@ function getProxies() {
     }
 }
 
-// 저장된 주소 불러오기
-function getGeneratedAddresses() {
-    try {
-        const addressFile = fs.readFileSync('generated_addresses.txt', 'utf8');
-        const addresses = [];
-        let currentAddress = {};
-        
-        addressFile.split('\n').forEach(line => {
-            if (line.startsWith('주소:')) {
-                currentAddress.address = line.split('주소:')[1].trim();
-            } else if (line.startsWith('개인키:')) {
-                currentAddress.privateKey = line.split('개인키:')[1].trim();
-                addresses.push({...currentAddress});
-                currentAddress = {};
-            }
-        });
-        
-        return addresses;
-    } catch (error) {
-        console.error('주소 파일 읽기 실패:', error);
+// 지갑 생성 함수
+async function generateWallets() {
+    const proxies = getProxies();
+    if (proxies.length === 0) {
+        console.error('프록시 목록을 찾을 수 없습니다');
         return [];
     }
+
+    console.log(`프록시 ${proxies.length}개 발견, 동일한 수의 지갑을 생성합니다...`);
+    
+    const wallets = [];
+    for (let i = 0; i < proxies.length; i++) {
+        const wallet = ethers.Wallet.createRandom();
+        wallets.push({
+            address: wallet.address,
+            privateKey: wallet.privateKey
+        });
+    }
+
+    // 생성된 지갑 정보 저장
+    const content = wallets.map(w => 
+        `주소:${w.address}\n개인키:${w.privateKey}`
+    ).join('\n');
+    
+    fs.writeFileSync('generated_addresses.txt', content);
+    console.log(`${wallets.length}개의 지갑이 생성되어 저장되었습니다.`);
+    
+    return wallets;
 }
 
 async function processAccount(address, privateKey, proxy, index) {
@@ -168,7 +174,7 @@ const twocaptcha_turnstile = (sitekey, pageurl) => new Promise(async (resolve) =
                 resolve(token.request);
                 break;
             }
-            await delay(2);
+            await delay(5);
         }
     } catch (error) {
         resolve('FAILED_GETTING_TOKEN');
@@ -265,4 +271,5 @@ const claimFaucet = (address) => new Promise(async (resolve) => {
         }
     }
 });
+
 
