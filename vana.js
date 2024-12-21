@@ -59,13 +59,17 @@ async function generateWallets() {
         });
     }
 
-    // 생성된 지갑 정보 저장
+    // 현재 시간을 파일명에 포함
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `generated_addresses_${timestamp}.txt`;
+    
+    // 새로운 지갑 정보를 새 파일에 저장
     const content = wallets.map(w => 
         `주소:${w.address}\n개인키:${w.privateKey}`
     ).join('\n');
     
-    fs.writeFileSync('generated_addresses.txt', content);
-    console.log(`${wallets.length}개의 지갑이 생성되어 저장되었습니다.`);
+    fs.writeFileSync(filename, content);
+    console.log(`${wallets.length}개의 지갑이 ${filename}에 저장되었습니다.`);
     
     return wallets;
 }
@@ -76,11 +80,10 @@ async function processAccount(address, privateKey, proxy, index) {
     console.log(`프록시: ${proxy}`);
 
     let retryCount = 0;
-    const maxRetries = 3; // 최대 재시도 횟수
+    const maxRetries = 3;
 
     while (retryCount < maxRetries) {
         try {
-            // 1. Follow 버튼 클릭
             console.log('Follow 버튼 클릭 시도...');
             const followSuccess = await clickFollowButton(proxy);
             if (!followSuccess) {
@@ -88,31 +91,34 @@ async function processAccount(address, privateKey, proxy, index) {
             }
             console.log('Follow 버튼 클릭 성공');
 
-            // 2. Captcha 토큰 획득
             console.log('Captcha 토큰 획득 시도...');
-            const captchaToken = await twocaptcha_turnstile('0x4AAAAAAADnHQBlrqABLwx', 'https://faucet.vana.com/mainnet');
-            if (captchaToken === 'ERROR_WRONG_USER_KEY' || captchaToken === 'ERROR_ZERO_BALANCE' || captchaToken === 'FAILED_GETTING_TOKEN') {
-                throw new Error(`Captcha 토큰 획득 실패: ${captchaToken}`);
+            const claimResult = await claimFaucet(address, proxy);
+            
+            // 성공 케이스 체크
+            if (claimResult.includes('Your request is processing')) {
+                console.log(`계정 ${index + 1}: ${claimResult}`);
+                return true;
             }
-            console.log('Captcha 토큰 획득 성공');
 
-            // 3. Faucet 청구
-            console.log('Faucet 청구 시도...');
-            const claimResult = await claimFaucet(address, captchaToken, proxy);
-            if (!claimResult.includes('성공')) {
-                throw new Error(`Faucet 청구 실패: ${claimResult}`);
-            }
-            console.log(`Faucet 청구 성공: ${claimResult}`);
-
-            return true; // 모든 단계가 성공적으로 완료됨
+            // 실패 케이스는 에러로 처리
+            throw new Error(claimResult);
 
         } catch (error) {
             retryCount++;
-            console.error(`계정 ${index + 1} 처리 중 오류 발생 (시도 ${retryCount}/${maxRetries}):`, error.message);
+            
+            // 24시간 제한이나 2captcha 에러는 즉시 실패
+            if (error.message.includes('24 hours') || 
+                error.message.includes('ERROR_WRONG_USER_KEY') || 
+                error.message.includes('ERROR_ZERO_BALANCE')) {
+                console.log(`계정 ${index + 1} 처리 중 오류 발생: ${error.message}`);
+                return false;
+            }
+            
+            console.log(`계정 ${index + 1} 처리 중 오류 발생 (시도 ${retryCount}/${maxRetries}): ${error.message}`);
             
             if (retryCount < maxRetries) {
                 console.log(`30초 후 재시도합니다...`);
-                await delay(30000); // 30초 대기 후 재시도
+                await delay(30000);
             } else {
                 console.log(`최대 재시도 횟수 도달. 계정 ${index + 1} 처리 실패`);
                 return false;
@@ -144,22 +150,33 @@ async function main() {
 
     console.log(`총 ${addresses.length}개의 계정과 ${proxies.length}개의 프록시로 작업을 시작합니다.`);
 
-    for (let i = 0; i < addresses.length; i++) {
-        const success = await processAccount(
-            addresses[i].address,
-            addresses[i].privateKey,
-            proxies[i],
-            i
+    // 10개씩 배치 처리
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < addresses.length; i += BATCH_SIZE) {
+        const batch = addresses.slice(i, Math.min(i + BATCH_SIZE, addresses.length));
+        console.log(`\n${i + 1}~${i + batch.length}번 계정 처리 중...`);
+
+        // 배치 내의 계정들을 동시에 처리
+        const results = await Promise.all(
+            batch.map((account, index) => 
+                processAccount(
+                    account.address,
+                    account.privateKey,
+                    proxies[i + index],
+                    i + index
+                )
+            )
         );
 
-        if (success) {
-            console.log(`계정 ${i + 1} 처리 완료`);
-        } else {
-            console.log(`계정 ${i + 1} 처리 실패`);
-        }
+        // 배치 결과 확인
+        const successCount = results.filter(result => result === true).length;
+        console.log(`배치 처리 완료: 성공 ${successCount}개, 실패 ${batch.length - successCount}개`);
 
-        // 다음 계정 처리 전 잠시 대기
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // 다음 배치 전 2초 대기
+        if (i + BATCH_SIZE < addresses.length) {
+            console.log('다음 배치 처리 전 2초 대기...');
+            await delay(2000);
+        }
     }
 
     console.log('모든 계정 처리 완료');
@@ -169,39 +186,70 @@ async function main() {
 main().catch(console.error);
 
 // 2captcha Turnstile 토큰을 받는 함수
-const twocaptcha_turnstile = (sitekey, pageurl) => new Promise(async (resolve) => {
+const twocaptcha_turnstile = (sitekey, pageurl, proxy) => new Promise(async (resolve) => {
     const captchaKey = process.env.CAPTCHA_API_KEY;
+    
     try {
-        const getToken = await fetch(`https://2captcha.com/in.php?key=${captchaKey}&method=turnstile&sitekey=${sitekey}&pageurl=${pageurl}&json=1`, {
-            method: 'GET',
-        })
-        .then(res => res.text())
-        .then(res => {
-            if (res == 'ERROR_WRONG_USER_KEY' || res == 'ERROR_ZERO_BALANCE') {
-                return resolve(res);
-            } else {
-                return res.split('|');
+        console.log('2Captcha API 요청 시작...');
+        
+        // 프록시 정보 파싱
+        const proxyParts = proxy.split('@');
+        const auth = proxyParts[0].replace('http://', '').split(':');
+        const [proxyAddress, proxyPort] = proxyParts[1].split(':');
+        
+        const createTaskData = {
+            "clientKey": captchaKey,
+            "task": {
+                "type": "TurnstileTask",
+                "websiteURL": "https://faucet.vana.com/mainnet",
+                "websiteKey": "0x4AAAAAAA2QYSDpMpFM53JQ",
+                "action": "managed",
+                "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "proxyType": "http",
+                "proxyAddress": proxyAddress,
+                "proxyPort": proxyPort,
+                "proxyLogin": auth[0],
+                "proxyPassword": auth[1]
             }
+        };
+
+        const createResponse = await fetch('https://api.2captcha.com/createTask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(createTaskData)
         });
 
-        if (getToken[0] != 'OK') {
-            resolve('FAILED_GETTING_TOKEN');
+        const createResult = await createResponse.json();
+        
+        if (createResult.errorId) {
+            return resolve('FAILED_GETTING_TOKEN');
         }
-    
-        const task = getToken[1];
 
         for (let i = 0; i < 60; i++) {
-            const token = await fetch(
-                `https://2captcha.com/res.php?key=${captchaKey}&action=get&id=${task}&json=1`
-            ).then(res => res.json());
+            await delay(2000);
             
-            if (token.status == 1) {
-                resolve(token.request);
-                break;
+            const resultResponse = await fetch('https://api.2captcha.com/getTaskResult', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    "clientKey": captchaKey,
+                    "taskId": createResult.taskId
+                })
+            });
+
+            const resultData = await resultResponse.json();
+            
+            if (resultData.status === 'ready') {
+                if (resultData.solution && resultData.solution.token) {
+                    return resolve(resultData.solution.token);
+                }
             }
-            await delay(5);
         }
+
+        resolve('FAILED_GETTING_TOKEN');
+        
     } catch (error) {
+        console.error('Captcha 처리 중 오류:', error);
         resolve('FAILED_GETTING_TOKEN');
     }
 });
@@ -209,7 +257,6 @@ const twocaptcha_turnstile = (sitekey, pageurl) => new Promise(async (resolve) =
 // clickFollowButton
 async function clickFollowButton(proxy) {
     try {
-        // 프록시 URL에서 인증 정보 추출
         const proxyParts = proxy.split('@');
         const auth = proxyParts[0].replace('http://', '').split(':');
         const host = proxyParts[1];
@@ -230,85 +277,101 @@ async function clickFollowButton(proxy) {
         
         const page = await browser.newPage();
         
-        // 프록시 인증 설정
         await page.authenticate({
             username: username,
             password: password
         });
-        
+
+        console.log('페이지 로딩 시작...');
         await page.goto('https://faucet.vana.com/mainnet', {
             waitUntil: 'networkidle0',
-            timeout: 30000
+            timeout: 60000
         });
+        
+        // 페이지 로드 후 잠시 대기
+        await delay(5000);
+        
+        console.log('버튼 찾는 중...');
+        // 다양한 선택자 시도
+        const buttonSelector = [
+            'button.follow-button',
+            'button[type="button"]',
+            '.button-container button',
+            'button.primary-button'
+        ];
 
-        await page.waitForSelector('button[data-testid="follow-button"]', { timeout: 10000 });
-        await page.click('button[data-testid="follow-button"]');
-        
-        await delay(2000);
+        let followButton = null;
+        for (const selector of buttonSelector) {
+            followButton = await page.$(selector);
+            if (followButton) {
+                console.log(`버튼 발견: ${selector}`);
+                break;
+            }
+        }
+
+        if (followButton) {
+            await followButton.evaluate(b => b.click());
+            console.log('Follow 버튼 클릭 성공');
+            
+            // 클릭 후 잠시 대기
+            await delay(5000);
+            
+            // 새 창이 열렸는지 확인
+            const pages = await browser.pages();
+            if (pages.length > 1) {
+                await pages[pages.length - 1].close();
+            }
+        } else {
+            throw new Error('Follow 버튼을 찾을 수 없습니다');
+        }
+
         await browser.close();
-        
         return true;
+        
     } catch (error) {
         console.error('Follow 버튼 클릭 중 오류 발생:', error);
+        if (browser) {
+            await browser.close();
+        }
         return false;
     }
 }
 
 // Faucet을 청구하는 함수
-const claimFaucet = (address) => new Promise(async (resolve) => {
-    let success = false;
-    
-    // Follow 버튼 클릭 먼저 실행
-    const followSuccess = await clickFollowButton();
-    if (!followSuccess) {
-        resolve('Follow 버튼 클릭 실패');
-        return;
-    }
-    
-    while (!success) {
-        const bearer = await twocaptcha_turnstile('0x4AAAAAAADnHQBlrqABLwx', 'https://faucet.vana.com/mainnet');
-        if (bearer == 'ERROR_WRONG_USER_KEY' || bearer == 'ERROR_ZERO_BALANCE' || bearer == 'FAILED_GETTING_TOKEN' ) {
-            success = true;
-            resolve(`클레임 실패, ${bearer}`);
+const claimFaucet = (address, proxy) => new Promise(async (resolve) => {
+    try {
+        console.log('캡챠 토큰 요청 중...');
+        const bearer = await twocaptcha_turnstile('0x4AAAAAAA2QYSDpMpFM53JQ', 'https://faucet.vana.com/mainnet', proxy);
+        
+        if (bearer === 'ERROR_WRONG_USER_KEY' || bearer === 'ERROR_ZERO_BALANCE' || bearer === 'FAILED_GETTING_TOKEN') {
+            return resolve(bearer);
         }
-    
-        try {
-            const res = await fetch('https://faucet.vana.com/api/transactions', {
-                method: 'POST',
-                headers: {
-                    "Accept": "*/*",
-                    "Accept-Encoding": "gzip, deflate, br, zstd",
-                    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-                    "Content-Type": "text/plain;charset=UTF-8",
-                    "Origin": "https://faucet.vana.com",
-                    "Priority": "u=1, i",
-                    "Referer": "https://faucet.vana.com/mainnet",
-                    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-                    "Sec-Ch-Ua-Mobile": "?0",
-                    "Sec-Ch-Ua-Platform": "Windows",
-                    "Sec-Fetch-Dest": "empty",
-                    "Sec-Fetch-Mode": "cors",
-                    "Sec-Fetch-Site": "same-origin",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                },
-                body: JSON.stringify({
-                    address: address,
-                    captchaToken: bearer.request
-                })
-            });
 
-            const data = await res.json();
-            
-            if (res.ok && (data.status === 'success' || data.success)) {
-                success = true;
-                resolve(`성공적으로 토큰을 클레임했습니다!`);
-            } else {
-                throw new Error(data.message || '클레임 실패');
-            }
-        } catch (error) {
-            console.error('클레임 중 오류 발생:', error);
-            await new Promise(resolve => setTimeout(resolve, 1000)); // 실패시 1초 대기
+        const requestBody = {
+            address: address,
+            captcha: bearer,
+            network: "mainnet"
+        };
+
+        const res = await fetch('https://faucet.vana.com/api/transactions', {
+            method: 'POST',
+            headers: {
+                "Content-Type": "text/plain;charset=UTF-8",
+                "Origin": "https://faucet.vana.com",
+                "Referer": "https://faucet.vana.com/mainnet"
+            },
+            body: JSON.stringify(requestBody)
+        });
+
+        const data = await res.json();
+        
+        if (data.status === 'pending') {
+            resolve(data.message);
+        } else {
+            resolve(data.error || data.message);
         }
+    } catch (error) {
+        resolve(error.message);
     }
 });
 
